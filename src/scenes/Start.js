@@ -19,6 +19,7 @@ export default class Start extends Phaser.Scene {
     // Success image (handle common typos)
     this.load.image('succeed_img', 'assets/succeed.jpg');
     this.load.image('succed_img', 'assets/succed.jpg');
+    this.load.image('succed_png', 'assets/succed.png');
 
     // 加载背景音乐（注意文件名大小写）
     this.load.audio('bgm', [

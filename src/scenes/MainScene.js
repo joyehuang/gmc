@@ -77,7 +77,7 @@ export default class MainScene extends Phaser.Scene {
     // 读取关卡参数，并设置目标分数
     this.level = data?.level ?? 1;
     // Target per level per latest spec
-    const targetByLevel = { 1: 20, 2: 30, 3: 40, 4: 50, 5: 60, 6: 100 };
+    const targetByLevel = { 1: 20, 2: 25, 3: 30, 4: 50, 5: 60, 6: 100 };
     this.targetScore = targetByLevel[this.level] ?? 26;
     this.levelText.setText(`Level ${this.level}`);
     // 规则说明弹窗按钮（?）
@@ -312,12 +312,24 @@ export default class MainScene extends Phaser.Scene {
 
     const passed = this.effectiveScore >= this.targetScore;
     if (passed) {
-      const currentUnlocked = Math.max(1, parseInt(localStorage.getItem('unlocked_level') || '1', 10));
-      const next = Math.max(currentUnlocked, (this.level || 1) + 1);
-      localStorage.setItem('unlocked_level', String(next));
-      this.time.delayedCall(200, () => {
-        this.scene.start('RewardSelect', { level: this.level || 1, nextLevel: next });
-      });
+      // 第六关通关，跳转到通关画面
+      if ((this.level || 1) >= 6) {
+        const key = this.textures.exists('succed_png') ? 'succed_png' : (this.textures.exists('succeed_img') ? 'succeed_img' : 'succed_img');
+        const img = this.add.image(this.scale.width / 2, this.scale.height / 2, key)
+          .setOrigin(0.5)
+          .setDepth(30)
+          .setScale(0.7);
+        this.time.delayedCall(1200, () => {
+          this.scene.start('Start');
+        });
+      } else {
+        const currentUnlocked = Math.max(1, parseInt(localStorage.getItem('unlocked_level') || '1', 10));
+        const next = Math.max(currentUnlocked, (this.level || 1) + 1);
+        localStorage.setItem('unlocked_level', String(next));
+        this.time.delayedCall(200, () => {
+          this.scene.start('RewardSelect', { level: this.level || 1, nextLevel: next });
+        });
+      }
     } else {
       this.showFailOverlay();
     }
