@@ -12,6 +12,14 @@ export default class Start extends Phaser.Scene {
     this.load.image('dice8',  'assets/dice_8.png');
     this.load.image('dice12', 'assets/dice_12.png');
 
+    // Reward images (try common extensions; use whichever exists later)
+    this.load.image('reward1_png', 'assets/reward1.png');
+    this.load.image('reward1_jpg', 'assets/reward1.jpg');
+
+    // Success image (handle common typos)
+    this.load.image('succeed_img', 'assets/succeed.jpg');
+    this.load.image('succed_img', 'assets/succed.jpg');
+
     // 加载背景音乐（注意文件名大小写）
     this.load.audio('bgm', [
       'assets/bgm.MP3'

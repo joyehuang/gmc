@@ -8,7 +8,8 @@ export default class MainScene extends Phaser.Scene {
     super('MainScene');
     this.totalScore = 0;
     this.rollsCount = 0;
-    this.targetScore = 26; // target score to display in score bar
+    this.targetScore = 26; // default, will be overridden by level
+    this.effectiveScore = 0; // after pair rule
   }
 
   preload() {
@@ -26,11 +27,20 @@ export default class MainScene extends Phaser.Scene {
     const topBar = this.add.rectangle(this.scale.width/2, 26, this.scale.width, 52, 0x1f1f1f).setOrigin(0.5);
     topBar.setDepth(10);
 
-    // Score Bar（右移以给返回按钮留空间）
-    this.scoreText = this.add.text(160, 16, '', {
+    // Level label（居中，放在上行）
+    this.levelText = this.add.text(this.scale.width / 2, 8, '', {
       fontSize: '18px', color: '#ffffff', fontFamily: 'monospace'
-    });
-    this.scoreText.setDepth(11);
+    }).setOrigin(0.5, 0).setDepth(11);
+
+    // Left: raw dice sum and rolls（下行，避免与 Level 重叠）
+    this.sumText = this.add.text(160, 32, '', {
+      fontSize: '18px', color: '#ffffff', fontFamily: 'monospace'
+    }).setDepth(11);
+
+    // Right: final score (after multiplier) and target（下行）
+    this.finalText = this.add.text(this.scale.width - 16, 32, '', {
+      fontSize: '18px', color: '#ffffff', fontFamily: 'monospace'
+    }).setOrigin(1, 0).setDepth(11);
     this.updateScoreBar();
 
     // 在 scene.jpg 背景上放置 4 个骰子（单行水平一排）
@@ -64,8 +74,12 @@ export default class MainScene extends Phaser.Scene {
     
     console.log(`总共创建了 ${this.diceUnits.length} 个骰子`);
 
-    // 读取关卡参数（可用于后续定制目标分数/次数等）
+    // 读取关卡参数，并设置目标分数
     this.level = data?.level ?? 1;
+    // Target per level per latest spec
+    const targetByLevel = { 1: 20, 2: 30, 3: 40, 4: 50, 5: 60, 6: 100 };
+    this.targetScore = targetByLevel[this.level] ?? 26;
+    this.levelText.setText(`Level ${this.level}`);
 
     // 启动新局：清空各骰历史，显示 5/5 次数，并将分数与次数归零
     this.diceUnits.forEach(du => du.clearHistory());
@@ -86,6 +100,12 @@ export default class MainScene extends Phaser.Scene {
     
     // 初始化时更新分数显示
     this.updateScoreDisplay();
+
+    // 右下角 End 按钮（提交本关）
+    this.createEndButton();
+
+    // 重置结束标志
+    this._ended = false;
   }
 
   initBgm() {
@@ -133,20 +153,195 @@ export default class MainScene extends Phaser.Scene {
   }
 
   updateScoreDisplay() {
-    const sum = this.diceUnits.reduce((acc, du) => acc + (du.value || 0), 0);
-    this.totalScore = sum;
-    this.updateScoreBar();
+    // 计算基础分，并根据关卡应用倍率：
+    // - Level 1: 只对子翻倍（已实现）
+    // - Level 2+: 在 Level 1 规则基础上，若出现顺子（四个连续数，顺序不限），则将这四个数的和×3，再与其他部分累加。
+    const values = this.diceUnits.map(du => du.value).filter(v => typeof v === 'number');
+    const sum = values.reduce((acc, v) => acc + v, 0);
 
-    // 通关判断：达到或超过目标分数，解锁下一关
-    if (this.totalScore >= this.targetScore) {
+    const counts = new Map();
+    for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
+
+    let effective = 0;
+    let hasPair = false;
+    const levelNum = this.level || 1;
+    // Multipliers by level (pair, straight, triplet)
+    const pairMultByLevel = { 1: 2, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4 };
+    const straightMultByLevel = { 1: 1, 2: 3, 3: 3, 4: 3, 5: 5, 6: 5 };
+    const tripletMultByLevel = { 1: null, 2: null, 3: 3, 4: 3, 5: 3, 6: 4 };
+    const pairMultiplier = pairMultByLevel[levelNum] ?? 2;
+    const straightMultiplier = straightMultByLevel[levelNum] ?? 1;
+    const tripletMultiplier = tripletMultByLevel[levelNum] ?? null;
+    // 第一阶段：按组加成
+    for (const [v, c] of counts.entries()) {
+      if (tripletMultiplier && c === 3) {
+        // 三连：三个相同数字的和 ×3
+        hasPair = true;
+        effective += v * c * tripletMultiplier; // v*3*3 = v*9
+      } else if (c >= 2) {
+        // 对子/四同：按关卡对子倍率
+        hasPair = true;
+        effective += v * c * pairMultiplier;
+      } else {
+        effective += v * c;
+      }
+    }
+
+    // 第二阶段（关卡>=2）：顺子额外×3，仅对顺子四个数的和应用三倍，避免与对子部分重复叠加
+    let hasStraight = false;
+    if (levelNum >= 2 && values.length === 4 && straightMultiplier > 1) {
+      const sorted = [...values].sort((a, b) => a - b);
+      hasStraight = (sorted[1] === sorted[0] + 1) && (sorted[2] === sorted[1] + 1) && (sorted[3] === sorted[2] + 1);
+      if (hasStraight) {
+        // 将顺子四个数的和按关卡倍率计算，并抵消之前已计入的部分（之前已按对子/三连计入了每个数，现替换为 straightMultiplier）
+        const straightSum = sorted[0] + sorted[1] + sorted[2] + sorted[3];
+        const previouslyCounted = sorted.reduce((acc, v) => {
+          const cnt = counts.get(v) || 0;
+          let mult = 1;
+          if (tripletMultiplier && cnt === 3) mult = tripletMultiplier;
+          else if (cnt >= 2) mult = pairMultiplier;
+          return acc + v * mult;
+        }, 0);
+        effective += (straightSum * straightMultiplier - previouslyCounted);
+      }
+    }
+
+    // 4 连（四个相同数字）直接通关：显示成功图并跳到下一关
+    const fourKind = [...counts.values()].some(c => c === 4);
+    if (fourKind) {
+      this.forcePassWithSucceedImage();
+      return;
+    }
+
+    this.totalScore = sum;
+    this.effectiveScore = effective;
+    this.hasPairBonus = hasPair; // 不在UI展示，仅保留状态
+    this.updateScoreBar();
+  }
+
+  // 用户主动提交结算
+  endLevel() {
+    if (this._ended) return;
+    this._ended = true;
+    // 禁用所有骰子交互
+    this.diceUnits.forEach(du => du.setDisabled(true));
+
+    const passed = this.effectiveScore >= this.targetScore;
+    if (passed) {
       const currentUnlocked = Math.max(1, parseInt(localStorage.getItem('unlocked_level') || '1', 10));
       const next = Math.max(currentUnlocked, (this.level || 1) + 1);
       localStorage.setItem('unlocked_level', String(next));
+      this.time.delayedCall(200, () => {
+        this.scene.start('RewardSelect', { level: this.level || 1, nextLevel: next });
+      });
+    } else {
+      this.showFailOverlay();
     }
   }
 
+  forcePassWithSucceedImage() {
+    if (this._ended) return;
+    this._ended = true;
+    this.diceUnits.forEach(du => du.setDisabled(true));
+    // 直接通关：展示成功图并跳奖励/下一关
+    const key = this.textures.exists('succeed_img') ? 'succeed_img' : 'succed_img';
+    const img = this.add.image(this.scale.width / 2, this.scale.height / 2, key)
+      .setOrigin(0.5)
+      .setDepth(30)
+      .setScale(0.7);
+
+    const next = Math.max( (this.level || 1) + 1, parseInt(localStorage.getItem('unlocked_level') || '1', 10) );
+    localStorage.setItem('unlocked_level', String(next));
+    this.time.delayedCall(800, () => {
+      this.scene.start('RewardSelect', { level: this.level || 1, nextLevel: next });
+    });
+  }
+
+  createEndButton() {
+    const w = 110, h = 40;
+    const x = this.scale.width - 16 - w / 2;
+    const y = this.scale.height - 16 - h / 2;
+    const bg = this.add.rectangle(x, y, w, h, 0x000000)
+      .setStrokeStyle(2, 0xffffff)
+      .setOrigin(0.5)
+      .setDepth(12)
+      .setAlpha(0.85);
+    const txt = this.add.text(x, y, 'End', {
+      fontSize: '16px', color: '#ffffff', fontFamily: 'monospace'
+    }).setOrigin(0.5).setDepth(12);
+
+    // 固定在屏幕（即使镜头滚动）
+    bg.setScrollFactor(0);
+    txt.setScrollFactor(0);
+
+    bg.setInteractive({ useHandCursor: true });
+    bg.on('pointerover', () => bg.setFillStyle(0x333333));
+    bg.on('pointerout',  () => bg.setFillStyle(0x000000));
+    bg.on('pointerdown', () => {
+      console.log('[UI] End clicked');
+      this.children.bringToTop(bg);
+      this.children.bringToTop(txt);
+      this.endLevel();
+    });
+
+    // 让点击文字也能触发
+    txt.setInteractive({ useHandCursor: true });
+    txt.on('pointerdown', () => {
+      console.log('[UI] End text clicked');
+      this.endLevel();
+    });
+  }
+
+  showFailOverlay() {
+    const overlay = this.add.rectangle(
+      this.scale.width / 2,
+      this.scale.height / 2,
+      this.scale.width,
+      this.scale.height,
+      0x000000,
+      0.6
+    ).setDepth(20);
+
+    const title = this.add.text(this.scale.width / 2, this.scale.height / 2 - 40, 'Failed', {
+      fontSize: '42px', color: '#ff6666', fontFamily: 'monospace', fontStyle: 'bold'
+    }).setOrigin(0.5).setDepth(21);
+
+    const sub = this.add.text(this.scale.width / 2, this.scale.height / 2, `Score ${this.effectiveScore} / ${this.targetScore}`,
+    {
+      fontSize: '18px', color: '#ffffff', fontFamily: 'monospace'
+    }).setOrigin(0.5).setDepth(21);
+
+    const btnW = 140, btnH = 40;
+    const retryX = this.scale.width / 2 - btnW;
+    const lvlX = this.scale.width / 2 + btnW;
+    const btnY = this.scale.height / 2 + 60;
+
+    const retryBg = this.add.rectangle(retryX, btnY, btnW, btnH, 0x000000)
+      .setStrokeStyle(2, 0xffffff).setOrigin(0.5).setDepth(21).setInteractive({ useHandCursor: true });
+    const retryTxt = this.add.text(retryX, btnY, 'Retry', { fontSize: '16px', color: '#ffffff', fontFamily: 'monospace' })
+      .setOrigin(0.5).setDepth(21);
+
+    const lvlBg = this.add.rectangle(lvlX, btnY, btnW, btnH, 0x000000)
+      .setStrokeStyle(2, 0xffffff).setOrigin(0.5).setDepth(21).setInteractive({ useHandCursor: true });
+    const lvlTxt = this.add.text(lvlX, btnY, 'Levels', { fontSize: '16px', color: '#ffffff', fontFamily: 'monospace' })
+      .setOrigin(0.5).setDepth(21);
+
+    retryBg.on('pointerover', () => retryBg.setFillStyle(0x333333));
+    retryBg.on('pointerout',  () => retryBg.setFillStyle(0x000000));
+    retryBg.on('pointerdown', () => {
+      this.scene.start('MainScene', { level: this.level || 1 });
+    });
+
+    lvlBg.on('pointerover', () => lvlBg.setFillStyle(0x333333));
+    lvlBg.on('pointerout',  () => lvlBg.setFillStyle(0x000000));
+    lvlBg.on('pointerdown', () => {
+      this.scene.start('LevelSelect');
+    });
+  }
+
   updateScoreBar() {
-    this.scoreText.setText(`Score: ${this.totalScore} / ${this.targetScore}    Rolls: ${this.rollsCount}`);
+    this.sumText.setText(`Dice Sum: ${this.totalScore}    Rolls: ${this.rollsCount}`);
+    this.finalText.setText(`Final: ${this.effectiveScore} / Target: ${this.targetScore}`);
   }
 
   createRollAllButton() {
