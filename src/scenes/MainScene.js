@@ -187,23 +187,35 @@ export default class MainScene extends Phaser.Scene {
       }
     }
 
-    // 第二阶段（关卡>=2）：顺子额外×3，仅对顺子四个数的和应用三倍，避免与对子部分重复叠加
-    let hasStraight = false;
-    if (levelNum >= 2 && values.length === 4 && straightMultiplier > 1) {
-      const sorted = [...values].sort((a, b) => a - b);
-      hasStraight = (sorted[1] === sorted[0] + 1) && (sorted[2] === sorted[1] + 1) && (sorted[3] === sorted[2] + 1);
-      if (hasStraight) {
-        // 将顺子四个数的和按关卡倍率计算，并抵消之前已计入的部分（之前已按对子/三连计入了每个数，现替换为 straightMultiplier）
-        const straightSum = sorted[0] + sorted[1] + sorted[2] + sorted[3];
-        const previouslyCounted = sorted.reduce((acc, v) => {
-          const cnt = counts.get(v) || 0;
+    // 第二阶段（关卡>=2）：顺子（任意3个连续数字）
+    if (levelNum >= 2 && values.length >= 3 && straightMultiplier > 1) {
+      // 枚举所有3选组合，选择收益最大的顺子三元组
+      const v = values;
+      const triples = [
+        [v[0], v[1], v[2]],
+        [v[0], v[1], v[3]],
+        [v[0], v[2], v[3]],
+        [v[1], v[2], v[3]],
+      ];
+      let bestGain = 0;
+      for (const t of triples) {
+        if (t.includes(undefined)) continue;
+        const s = [...t].sort((a, b) => a - b);
+        const isStraight3 = (s[1] === s[0] + 1) && (s[2] === s[1] + 1);
+        if (!isStraight3) continue;
+        const straightSum3 = s[0] + s[1] + s[2];
+        // 之前这三颗各自按对子/三连已计入的分
+        const prev = t.reduce((acc, val) => {
+          const cnt = counts.get(val) || 0;
           let mult = 1;
           if (tripletMultiplier && cnt === 3) mult = tripletMultiplier;
           else if (cnt >= 2) mult = pairMultiplier;
-          return acc + v * mult;
+          return acc + val * mult;
         }, 0);
-        effective += (straightSum * straightMultiplier - previouslyCounted);
+        const gain = straightSum3 * straightMultiplier - prev;
+        if (gain > bestGain) bestGain = gain;
       }
+      if (bestGain > 0) effective += bestGain;
     }
 
     // 4 连（四个相同数字）直接通关：显示成功图并跳到下一关
