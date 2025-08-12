@@ -32,13 +32,13 @@ export default class MainScene extends Phaser.Scene {
       fontSize: '18px', color: '#ffffff', fontFamily: 'monospace'
     }).setOrigin(0.5, 0).setDepth(11);
 
-    // Left: raw dice sum and rolls（下行，避免与 Level 重叠）
-    this.sumText = this.add.text(160, 32, '', {
+    // Left: raw dice sum and rolls
+    this.sumText = this.add.text(160, 16, '', {
       fontSize: '18px', color: '#ffffff', fontFamily: 'monospace'
     }).setDepth(11);
 
-    // Right: final score (after multiplier) and target（下行）
-    this.finalText = this.add.text(this.scale.width - 16, 32, '', {
+    // Right: final score (after multiplier) and target
+    this.finalText = this.add.text(this.scale.width - 16, 16, '', {
       fontSize: '18px', color: '#ffffff', fontFamily: 'monospace'
     }).setOrigin(1, 0).setDepth(11);
     this.updateScoreBar();
@@ -80,6 +80,8 @@ export default class MainScene extends Phaser.Scene {
     const targetByLevel = { 1: 20, 2: 30, 3: 40, 4: 50, 5: 60, 6: 100 };
     this.targetScore = targetByLevel[this.level] ?? 26;
     this.levelText.setText(`Level ${this.level}`);
+    // 规则说明弹窗按钮（?）
+    this.createRuleHintButton();
 
     // 启动新局：清空各骰历史，显示 5/5 次数，并将分数与次数归零
     this.diceUnits.forEach(du => du.clearHistory());
@@ -140,6 +142,76 @@ export default class MainScene extends Phaser.Scene {
       }
       this.scene.start('Start');
     });
+  }
+
+  createRuleHintButton() {
+    const r = 20;
+    const x = 16 + r; // 左下角
+    const y = this.scale.height - 16 - r;
+    const bg = this.add.circle(x, y, r, 0x000000)
+      .setStrokeStyle(2, 0xffffff)
+      .setDepth(12)
+      .setAlpha(0.85)
+      .setInteractive({ useHandCursor: true });
+    const txt = this.add.text(x, y, '?', { fontSize: '18px', color: '#ffffff', fontFamily: 'monospace' })
+      .setOrigin(0.5)
+      .setDepth(12);
+
+    // 固定在屏幕
+    bg.setScrollFactor(0);
+    txt.setScrollFactor(0);
+
+    bg.on('pointerover', () => bg.setFillStyle(0x333333));
+    bg.on('pointerout',  () => bg.setFillStyle(0x000000));
+    bg.on('pointerdown', () => this.showRuleOverlay());
+  }
+
+  showRuleOverlay() {
+    const overlay = this.add.rectangle(
+      this.scale.width / 2,
+      this.scale.height / 2,
+      this.scale.width,
+      this.scale.height,
+      0x000000,
+      0.6
+    ).setDepth(30);
+
+    const boxW = this.scale.width - 160;
+    const boxH = 220;
+    const box = this.add.rectangle(this.scale.width / 2, this.scale.height / 2, boxW, boxH, 0x1f1f1f)
+      .setStrokeStyle(2, 0xffffff)
+      .setOrigin(0.5)
+      .setDepth(31);
+
+    const pairMultByLevel = { 1: 2, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4 };
+    const straightMultByLevel = { 1: 1, 2: 3, 3: 3, 4: 3, 5: 5, 6: 5 };
+    const tripletMultByLevel = { 1: null, 2: null, 3: 3, 4: 3, 5: 3, 6: 4 };
+    const p = pairMultByLevel[this.level];
+    const s = straightMultByLevel[this.level];
+    const t = tripletMultByLevel[this.level];
+    const lines = [
+      `Level ${this.level}`,
+      `Pair x${p}${t ? `   |   Triplet x${t}` : ''}${s && s > 1 ? `   |   Straight x${s}` : ''}`,
+      `Target ${this.targetScore}`
+    ];
+    const text = this.add.text(this.scale.width / 2, this.scale.height / 2, lines.join('\n'), {
+      fontSize: '18px', color: '#ffffff', fontFamily: 'monospace', align: 'center'
+    }).setOrigin(0.5).setDepth(32);
+
+    const btnW = 120, btnH = 40;
+    const confirm = this.add.rectangle(this.scale.width / 2, this.scale.height / 2 + boxH/2 - 30, btnW, btnH, 0x000000)
+      .setStrokeStyle(2, 0xffffff)
+      .setOrigin(0.5)
+      .setDepth(33)
+      .setInteractive({ useHandCursor: true });
+    const btnTxt = this.add.text(confirm.x, confirm.y, 'OK', { fontSize: '16px', color: '#ffffff', fontFamily: 'monospace' })
+      .setOrigin(0.5)
+      .setDepth(34);
+    confirm.on('pointerover', () => confirm.setFillStyle(0x333333));
+    confirm.on('pointerout',  () => confirm.setFillStyle(0x000000));
+    const close = () => { overlay.destroy(); box.destroy(); text.destroy(); confirm.destroy(); btnTxt.destroy(); };
+    confirm.on('pointerdown', close);
+    overlay.setInteractive().on('pointerdown', close);
   }
 
   onDiceRolled(idx, _val) {
