@@ -11,6 +11,11 @@ export default class Start extends Phaser.Scene {
     this.load.image('dice6',  'assets/dice_6.png');
     this.load.image('dice8',  'assets/dice_8.png');
     this.load.image('dice12', 'assets/dice_12.png');
+
+    // 加载背景音乐（注意文件名大小写）
+    this.load.audio('bgm', [
+      'assets/bgm.MP3'
+    ]);
   }
 
   create() {
@@ -43,8 +48,12 @@ export default class Start extends Phaser.Scene {
     btn.on('pointerover', () => btn.setFillStyle(0x4d4d4d));
     btn.on('pointerout',  () => btn.setFillStyle(0x333333));
     btn.on('pointerdown', () => {
-      // 切换到主场景
-      this.scene.start('MainScene');
+      // 解锁音频上下文（Safari/移动端需要用户手势）
+      if (this.sound && this.sound.context && this.sound.context.state === 'suspended') {
+        this.sound.context.resume();
+      }
+      // 切换到关卡选择
+      this.scene.start('LevelSelect');
     });
   }
 }

@@ -8,13 +8,14 @@ export default class MainScene extends Phaser.Scene {
     super('MainScene');
     this.totalScore = 0;
     this.rollsCount = 0;
+    this.targetScore = 26; // target score to display in score bar
   }
 
   preload() {
     // 所有资源已在Start场景加载，这里不需要重复加载
   }
 
-  create() {
+  create(data) {
     // 添加背景图片（固定在最底层）
     const bg = this.add.image(this.scale.width / 2, this.scale.height / 2, 'sceneBg')
       .setOrigin(0.5)
@@ -25,8 +26,8 @@ export default class MainScene extends Phaser.Scene {
     const topBar = this.add.rectangle(this.scale.width/2, 26, this.scale.width, 52, 0x1f1f1f).setOrigin(0.5);
     topBar.setDepth(10);
 
-    // Score Bar
-    this.scoreText = this.add.text(16, 16, '', {
+    // Score Bar（右移以给返回按钮留空间）
+    this.scoreText = this.add.text(160, 16, '', {
       fontSize: '18px', color: '#ffffff', fontFamily: 'monospace'
     });
     this.scoreText.setDepth(11);
@@ -63,6 +64,9 @@ export default class MainScene extends Phaser.Scene {
     
     console.log(`总共创建了 ${this.diceUnits.length} 个骰子`);
 
+    // 读取关卡参数（可用于后续定制目标分数/次数等）
+    this.level = data?.level ?? 1;
+
     // 启动新局：清空各骰历史，显示 5/5 次数，并将分数与次数归零
     this.diceUnits.forEach(du => du.clearHistory());
     this.totalScore = 0;
@@ -72,14 +76,50 @@ export default class MainScene extends Phaser.Scene {
     // 初始化锁状态：只允许第一个和其“下一个”
     this.refreshDiceLocks();
 
-    // 一键 Roll All（可选）
-    this.createRollAllButton();
-    
-    // 创建清除按钮
-    this.createClearButton();
+    // 启动 BGM
+    this.initBgm();
+
+    // 返回主页按钮
+    this.createBackButton();
+
+    // 右上角按钮已移除（不再创建 Roll All / Clear All）
     
     // 初始化时更新分数显示
     this.updateScoreDisplay();
+  }
+
+  initBgm() {
+    // 读取本地静音状态，默认开启
+    this.bgmOn = JSON.parse(localStorage.getItem('bgm_on') ?? 'true');
+    // 创建音频并循环播放
+    if (this.sound && this.cache.audio.exists('bgm')) {
+      this.bgm = this.sound.add('bgm', { loop: true, volume: 0.5 });
+      if (this.bgmOn) this.bgm.play();
+    }
+  }
+
+  createBackButton() {
+    const w = 110, h = 36;
+    const x = 16 + w/2;
+    const y = 16 + h/2;
+    const bg = this.add.rectangle(x, y, w, h, 0x000000)
+      .setStrokeStyle(2, 0xffffff)
+      .setOrigin(0.5)
+      .setDepth(12)
+      .setAlpha(0.85);
+    const txt = this.add.text(x, y, 'Back', { fontSize: '14px', color: '#ffffff', fontFamily: 'monospace' })
+      .setOrigin(0.5)
+      .setDepth(12);
+    bg.setInteractive({ useHandCursor: true });
+    bg.on('pointerover', () => bg.setFillStyle(0x4d4d4d));
+    bg.on('pointerout',  () => bg.setFillStyle(0x000000));
+    bg.on('pointerdown', () => {
+      // 停止 BGM 并返回 Start 场景
+      if (this.bgm) {
+        this.bgm.stop();
+      }
+      this.scene.start('Start');
+    });
   }
 
   onDiceRolled(idx, _val) {
@@ -96,19 +136,35 @@ export default class MainScene extends Phaser.Scene {
     const sum = this.diceUnits.reduce((acc, du) => acc + (du.value || 0), 0);
     this.totalScore = sum;
     this.updateScoreBar();
+
+    // 通关判断：达到或超过目标分数，解锁下一关
+    if (this.totalScore >= this.targetScore) {
+      const currentUnlocked = Math.max(1, parseInt(localStorage.getItem('unlocked_level') || '1', 10));
+      const next = Math.max(currentUnlocked, (this.level || 1) + 1);
+      localStorage.setItem('unlocked_level', String(next));
+    }
   }
 
   updateScoreBar() {
-    this.scoreText.setText(`Score: ${this.totalScore}    Rolls: ${this.rollsCount}`);
+    this.scoreText.setText(`Score: ${this.totalScore} / ${this.targetScore}    Rolls: ${this.rollsCount}`);
   }
 
   createRollAllButton() {
     const w = 130, h = 40;
-    const x = this.scale.width - w - 16;
-    const y = 16 + h/2;
+    const rightMargin = 16;
+    const spacing = 12;
+    // 清除按钮在最右，Roll All 在其左边
+    const clearX = this.scale.width - rightMargin - w / 2;
+    const rollAllX = clearX - spacing - w;
+    const y = 16 + h / 2;
 
-    const bg = this.add.rectangle(x, y, w, h, 0x444444).setStrokeStyle(2, 0xffffff).setOrigin(0.5);
-    const txt = this.add.text(x, y, 'Roll All', { fontSize: '16px', color: '#ffffff', fontFamily: 'monospace' }).setOrigin(0.5);
+    const bg = this.add.rectangle(rollAllX, y, w, h, 0x444444)
+      .setStrokeStyle(2, 0xffffff)
+      .setOrigin(0.5)
+      .setDepth(12);
+    const txt = this.add.text(rollAllX, y, 'Roll All', {
+      fontSize: '16px', color: '#ffffff', fontFamily: 'monospace'
+    }).setOrigin(0.5).setDepth(12);
 
     bg.setInteractive({ useHandCursor: true });
     bg.on('pointerover', () => bg.setFillStyle(0x565656));
@@ -159,11 +215,17 @@ export default class MainScene extends Phaser.Scene {
 
   createClearButton() {
     const w = 130, h = 40;
-    const x = this.scale.width - 280 - 16; // 放在Roll All按钮左边，增加间距
-    const y = 16 + h/2;
+    const rightMargin = 16;
+    const x = this.scale.width - rightMargin - w / 2; // 紧贴右边缘内侧
+    const y = 16 + h / 2;
 
-    const bg = this.add.rectangle(x, y, w, h, 0x663333).setStrokeStyle(2, 0xffffff).setOrigin(0.5);
-    const txt = this.add.text(x, y, 'Clear All', { fontSize: '16px', color: '#ffffff', fontFamily: 'monospace' }).setOrigin(0.5);
+    const bg = this.add.rectangle(x, y, w, h, 0x663333)
+      .setStrokeStyle(2, 0xffffff)
+      .setOrigin(0.5)
+      .setDepth(12);
+    const txt = this.add.text(x, y, 'Clear All', {
+      fontSize: '16px', color: '#ffffff', fontFamily: 'monospace'
+    }).setOrigin(0.5).setDepth(12);
 
     bg.setInteractive({ useHandCursor: true });
     bg.on('pointerover', () => bg.setFillStyle(0x774444));
